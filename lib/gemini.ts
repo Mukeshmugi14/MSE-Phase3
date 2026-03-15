@@ -18,7 +18,7 @@ const OLLAMA_PORT = 11434
 async function checkOllamaHealth(): Promise<void> {
   try {
     const res = await fetch(`http://${OLLAMA_HOST}:${OLLAMA_PORT}/api/tags`, {
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(10000),
     })
     if (!res.ok) {
       throw new Error(`Ollama returned status ${res.status}`)
@@ -39,120 +39,53 @@ async function checkOllamaHealth(): Promise<void> {
  */
 function buildClinicalPrompt(
   transcript: string,
-  patientContext: { age: number; gender: string; presenting_complaint: string; past_psychiatric_history?: string; substance_use?: string },
+  patientContext: any,
   prosodyContext?: ProsodyAssessment,
   facsContext?: FACSAssessment,
   yoloFindings?: Partial<FACSAssessment>
 ): string {
-  return `You are a clinical psychiatrist AI. Synthesize ALL provided data into a DSM-5 Mental Status Examination.
+  return `You are an expert clinical psychiatrist AI. Your goal is to synthesize multimodal behavior data into a precise, professional Mental Status Examination (MSE).
 
-PATIENT CONTEXT:
+CLINICAL REASONING INSTRUCTIONS:
+1. **Mood vs Affect**: Evaluate congruence between the patient's reported mood in transcript and the CV-captured Facial Affect.
+2. **Cognitive Logic**: Look for formal thought disorders (tangentiality, circumstantiality) in the Whisper transcript.
+3. **Risk Profile**: If there are ANY mentions of self-harm, hopelessness, or violence, escalate Risk to Moderate or High immediately.
+4. **Severity Scoring**: Scores from 0 (Normal) to 100 (Pathological). Use a conservative approach: >70 requires significant evidence of pathology.
+
+PATIENT CLINICAL CONTEXT:
 - Age: ${patientContext.age}, Gender: ${patientContext.gender}
-- Presenting Complaint: ${patientContext.presenting_complaint}
-- Psychiatric History: ${patientContext.past_psychiatric_history || 'None reported'}
-- Substance Use: ${patientContext.substance_use || 'None reported'}
+- Chief Complaint: ${patientContext.presenting_complaint}
+- Psychosocial Stressors: ${patientContext.current_stressors || 'None reported'}
 
-TRANSCRIPT (from Whisper):
-${transcript || '[No speech detected — silent interaction]'}
+TRANSCRIPT (Whisper ASR):
+${transcript || '[No speech detected]'}
 
-VISION MARKERS (from YOLO/FACS):
-- Psychomotor observations: ${yoloFindings?.observations?.join(', ') || 'No significant findings'}
+VISION BIOMARKERS (YOLO/FACS):
+- General Psychomotor: ${yoloFindings?.observations?.join(', ') || 'Normal'}
 - Dominant Emotion: ${facsContext?.dominant_emotion || yoloFindings?.dominant_emotion || 'neutral'}
 - Affect Range: ${facsContext?.affect_range || 'not assessed'}
-- Affect Score: ${facsContext?.affect_range_score ?? 'N/A'}
 
 PROSODY DATA:
 - Speech Rate: ${prosodyContext?.speech_rate_wpm ?? 0} WPM (${prosodyContext?.speech_rate_category || 'unknown'})
-- Pitch Mean: ${prosodyContext?.pitch_mean_hz ?? 0} Hz, Variance: ${prosodyContext?.pitch_variance ?? 0}
-- Pause Frequency: ${prosodyContext?.pause_frequency ?? 0}/min
-- Prosody Flags: ${prosodyContext?.flags?.join(', ') || 'None'}
 
-INSTRUCTIONS: Return ONLY a valid JSON object with EXACTLY this structure (no markdown, no explanation, just JSON):
+RESPONSE SCHEMA (Return ONLY valid JSON):
 {
   "assessment": {
-    "mood_affect": {
-      "score": <0-100>,
-      "severity": "<normal|mild|moderate|severe>",
-      "observations": ["..."],
-      "flags": ["..."],
-      "mood_quality": "<euthymic|depressed|anxious|irritable|euphoric|dysphoric>",
-      "affect_range": "<full|restricted|flat|labile|blunted>",
-      "mood_congruence": <true|false>
-    },
-    "speech": {
-      "score": <0-100>,
-      "severity": "<normal|mild|moderate|severe>",
-      "observations": ["..."],
-      "flags": ["..."],
-      "rate": "<normal|slow|fast|pressured|mute>",
-      "volume": "<normal|soft|loud>",
-      "coherence": "<coherent|loosely_associated|incoherent|tangential|circumstantial>",
-      "fluency": "<fluent|dysarthric|stuttering|latent>"
-    },
-    "thought_content": {
-      "score": <0-100>,
-      "severity": "<normal|mild|moderate|severe>",
-      "observations": ["..."],
-      "flags": ["..."],
-      "suicidal_ideation": <true|false>,
-      "homicidal_ideation": <true|false>,
-      "delusions_present": <true|false>,
-      "delusion_types": [],
-      "obsessions": <true|false>,
-      "paranoid_themes": <true|false>
-    },
-    "thought_process": {
-      "score": <0-100>,
-      "severity": "<normal|mild|moderate|severe>",
-      "observations": ["..."],
-      "flags": ["..."],
-      "organization": "<organized|disorganized>",
-      "flight_of_ideas": <true|false>,
-      "tangentiality": <true|false>,
-      "circumstantiality": <true|false>,
-      "thought_blocking": <true|false>,
-      "perseveration": <true|false>
-    },
-    "perception": {
-      "score": <0-100>,
-      "severity": "<normal|mild|moderate|severe>",
-      "observations": ["..."],
-      "flags": ["..."],
-      "hallucinations_present": <true|false>,
-      "hallucination_types": [],
-      "illusions": <true|false>,
-      "depersonalization": <true|false>,
-      "derealization": <true|false>
-    },
-    "insight": {
-      "score": <0-100>,
-      "severity": "<normal|mild|moderate|severe>",
-      "observations": ["..."],
-      "flags": ["..."],
-      "illness_awareness": "<full|partial|none>",
-      "treatment_acceptance": "<willing|ambivalent|refusing>"
-    },
-    "judgment": {
-      "score": <0-100>,
-      "severity": "<normal|mild|moderate|severe>",
-      "observations": ["..."],
-      "flags": ["..."],
-      "decision_making": "<intact|impaired|severely_impaired>",
-      "social_judgment": "<intact|impaired>"
-    }
+    "appearance": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "grooming": "", "dress": "", "physical_characteristics": [] },
+    "behavior": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "activity_level": "", "eye_contact": "", "rapport": "", "abnormal_movements": [] },
+    "speech": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "rate": "normal|slow|fast|pressured|mute", "volume": "normal|soft|loud", "coherence": "coherent|loosely_associated|incoherent|tangential|circumstantial", "fluency": "fluent|dysarthric|stuttering|latent" },
+    "mood": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "quality": "euthymic|depressed|anxious|irritable|euphoric|dysphoric", "intensity": "" },
+    "affect": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "range": "full|restricted|flat|labile|blunted", "congruence": true, "stability": "" },
+    "thought_process": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "organization": "organized|disorganized", "flight_of_ideas": false, "tangentiality": false, "circumstantiality": false, "thought_blocking": false, "perseveration": false },
+    "thought_content": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "suicidal_ideation": false, "homicidal_ideation": false, "delusions_present": false, "delusion_types": [], "obsessions": false, "paranoid_themes": false },
+    "perception": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "hallucinations_present": false, "hallucination_types": [], "illusions": false, "depersonalization": false, "derealization": false },
+    "cognition": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "orientation": [], "attention_concentration": "", "memory_recall": "" },
+    "insight_judgment": { "score": 0-100, "severity": "normal|mild|moderate|severe", "observations": [], "flags": [], "illness_awareness": "full|partial|none", "treatment_acceptance": "willing|ambivalent|refusing", "decision_making": "intact|impaired|severely_impaired", "social_judgment": "intact|impaired" }
   },
-  "risk_assessment": {
-    "suicide_risk": "<none|low|moderate|high|imminent>",
-    "suicide_risk_factors": ["..."],
-    "violence_risk": "<none|low|moderate|high>",
-    "violence_risk_factors": ["..."],
-    "psychosis_probability": <0.0-1.0>,
-    "requires_immediate_action": <true|false>,
-    "recommended_actions": ["..."]
-  },
-  "overall_severity": <0-100>,
-  "clinical_summary": "<2-4 sentence clinical summary>",
-  "diagnostic_impression": "<diagnostic impression based on DSM-5>"
+  "risk_assessment": { "suicide_risk": "none|low|moderate|high|imminent", "violence_risk": "none|low|moderate|high", "psychosis_probability": 0.0-1.0, "requires_immediate_action": false, "recommended_actions": [] },
+  "overall_severity": 0-100,
+  "clinical_summary": "...",
+  "diagnostic_impression": "..."
 }`
 }
 
@@ -190,13 +123,16 @@ function buildDefaultResult(): AssessmentResult {
 
   return {
     assessment: {
-      mood_affect: { ...defaultDomain, mood_quality: 'euthymic', affect_range: 'full', mood_congruence: true },
+      appearance: { ...defaultDomain, grooming: 'adequate', dress: 'appropriate', physical_characteristics: [] },
+      behavior: { ...defaultDomain, activity_level: 'normal', eye_contact: 'appropriate', rapport: 'cooperative', abnormal_movements: [] },
       speech: { ...defaultDomain, rate: 'normal', volume: 'normal', coherence: 'coherent', fluency: 'fluent' },
-      thought_content: { ...defaultDomain, suicidal_ideation: false, homicidal_ideation: false, delusions_present: false, delusion_types: [], obsessions: false, paranoid_themes: false },
+      mood: { ...defaultDomain, quality: 'euthymic', intensity: 'normal' },
+      affect: { ...defaultDomain, range: 'full', congruence: true, stability: 'stable' },
       thought_process: { ...defaultDomain, organization: 'organized', flight_of_ideas: false, tangentiality: false, circumstantiality: false, thought_blocking: false, perseveration: false },
+      thought_content: { ...defaultDomain, suicidal_ideation: false, homicidal_ideation: false, delusions_present: false, delusion_types: [], obsessions: false, paranoid_themes: false },
       perception: { ...defaultDomain, hallucinations_present: false, hallucination_types: [], illusions: false, depersonalization: false, derealization: false },
-      insight: { ...defaultDomain, illness_awareness: 'full', treatment_acceptance: 'willing' },
-      judgment: { ...defaultDomain, decision_making: 'intact', social_judgment: 'intact' },
+      cognition: { ...defaultDomain, orientation: ['time', 'place', 'person'], attention_concentration: 'normal', memory_recall: 'normal' },
+      insight_judgment: { ...defaultDomain, illness_awareness: 'full', treatment_acceptance: 'willing', decision_making: 'intact', social_judgment: 'intact' },
     },
     risk_assessment: {
       suicide_risk: 'none',
@@ -228,13 +164,16 @@ function mergeWithDefaults(parsed: any): AssessmentResult {
 
   return {
     assessment: {
-      mood_affect: mergeDomain(assessment.mood_affect, defaults.assessment.mood_affect),
+      appearance: mergeDomain(assessment.appearance, defaults.assessment.appearance),
+      behavior: mergeDomain(assessment.behavior, defaults.assessment.behavior),
       speech: mergeDomain(assessment.speech, defaults.assessment.speech),
-      thought_content: mergeDomain(assessment.thought_content, defaults.assessment.thought_content),
+      mood: mergeDomain(assessment.mood, defaults.assessment.mood),
+      affect: mergeDomain(assessment.affect, defaults.assessment.affect),
       thought_process: mergeDomain(assessment.thought_process, defaults.assessment.thought_process),
+      thought_content: mergeDomain(assessment.thought_content, defaults.assessment.thought_content),
       perception: mergeDomain(assessment.perception, defaults.assessment.perception),
-      insight: mergeDomain(assessment.insight, defaults.assessment.insight),
-      judgment: mergeDomain(assessment.judgment, defaults.assessment.judgment),
+      cognition: mergeDomain(assessment.cognition, defaults.assessment.cognition),
+      insight_judgment: mergeDomain(assessment.insight_judgment, defaults.assessment.insight_judgment),
     },
     risk_assessment: {
       ...defaults.risk_assessment,

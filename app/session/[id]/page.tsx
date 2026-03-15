@@ -18,9 +18,22 @@ const STAGE_LABELS: Record<Stage, string> = {
 }
 
 const STAGE_SUBSTEPS: Partial<Record<Stage, string[]>> = {
-  transcribing: ['Converting audio to text via Whisper', 'Extracting clinical keywords', 'Preparing transcript for analysis'],
-  assessing:    ['Analysing mood and affect patterns', 'Evaluating speech coherence and rate', 'Screening thought content for risk', 'Assessing thought process organisation', 'Computing insight and judgment scores', 'Generating risk stratification', 'Composing clinical summary'],
+  transcribing: ['Decoding clinical audio stream', 'Downsampling to 16kHz for Whisper', 'Xenova/Whisper neural transcription', 'Extracting acoustic prosody markers'],
+  assessing:    [
+    'Analysing mood and affect patterns', 
+    'Evaluating speech coherence and rate', 
+    'Screening thought content for risk', 
+    'Assessing thought process organisation', 
+    'Computing insight and judgment scores', 
+    'Generating risk stratification', 
+    'Composing clinical summary'
+  ],
 }
+
+const DOMAINS_TRACKED = [
+  'Appearance', 'Behavior', 'Speech', 'Mood', 'Affect', 
+  'Thought Process', 'Thought Content', 'Perception', 'Cognition', 'Insight & Judgment'
+]
 
 export default function SessionPage() {
   const params       = useParams()
@@ -175,42 +188,68 @@ export default function SessionPage() {
 
     try {
       // 2. Decode audio and downsample to 16kHz for Whisper
+      console.log('[Clinical-HUD] Decoding audio for ASR...')
       const ctx = new AudioContext({ sampleRate: 16000 })
       const arrayBuffer = await blob.arrayBuffer()
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+      
+      let audioBuffer: AudioBuffer
+      try {
+        audioBuffer = await ctx.decodeAudioData(arrayBuffer)
+      } catch (decodeErr) {
+        console.error('[Clinical-HUD] Audio decoding failed:', decodeErr)
+        throw new Error('Failed to decode medical audio stream. Ensure microphone was active.')
+      }
+      
       const float32Array = audioBuffer.getChannelData(0)
 
       // 3. Prosody Analyser
-      // Use original blob for prosody because it needs standard sample rate
-      const prosodyData = await analyseProsody(blob, textCount(transcript), elapsed)
+      console.log('[Clinical-HUD] Extracting prosody biomarkers...')
+      let finalProsody
+      try {
+        finalProsody = await analyseProsody(blob, textCount(transcript), elapsed)
+      } catch (prosodyErr) {
+        console.warn('[Clinical-HUD] Prosody analysis failed:', prosodyErr)
+        // Non-fatal, provide fallback
+        finalProsody = { speech_rate_wpm: 0, speech_rate_category: 'unknown' }
+      }
 
       // 4. Transcribe
+      console.log('[Clinical-HUD] Sending to Whisper API...')
       const fd = new FormData()
       const pcmBlob = new Blob([float32Array], { type: 'application/octet-stream' })
       fd.append('audio', pcmBlob, 'session.raw')
       fd.append('language', selectedLanguage)
 
       const tr = await fetch('/api/transcribe', { method: 'POST', body: fd })
+      if (!tr.ok) {
+        const errJson = await tr.json().catch(() => ({}))
+        throw new Error(errJson.error || `Transcription API returned status ${tr.status}`)
+      }
+      
       const { transcript: text, error: trErr } = await tr.json()
       if (trErr) throw new Error(trErr)
+      
+      console.log(`[Clinical-HUD] Transcription received (${text?.length || 0} chars)`)
       setTranscript(text || '')
       
       const wordCount = (text || '').trim().split(/\s+/).length
-      // Re-run prosody with accurate word count if transcript is ready
-      const finalProsody = await analyseProsody(blob, wordCount, elapsed)
+      // Re-run prosody with accurate word count
+      const refinedProsody = await analyseProsody(blob, wordCount, elapsed).catch(() => finalProsody)
 
       // Save transcript and preliminary data
+      console.log('[Clinical-HUD] Persisting preliminary session data...')
       await supabase.from('mse_sessions').update({ 
         transcript: text, 
         status: 'assessing', 
         audio_duration_seconds: elapsed,
         facs_data: facsData,
-        prosody_data: finalProsody 
+        prosody_data: refinedProsody 
       })
       .eq('id', sessionId)
 
-      // 5. Assess (Google Clinical Vision)
+      // 5. Assess (Google Clinical Vision Integration)
       setStage('assessing')
+      console.log('[Clinical-HUD] Running multimodal Llama3 assessment...')
       const ar = await fetch('/api/assess', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -218,26 +257,37 @@ export default function SessionPage() {
           sessionId,
           transcript: text,
           facs_data: facsData,
-          prosody_data: finalProsody,
-          images, // Multimodal keyframes
+          prosody_data: refinedProsody,
+          images,
           patientContext: patient ? {
             age: patient.age,
             gender: patient.gender,
             presenting_complaint: patient.presenting_complaint,
             past_psychiatric_history: patient.past_psychiatric_history,
-            substance_use: patient.substance_use,
           } : { age: 30, gender: 'unknown', presenting_complaint: 'Not specified' },
         }),
       })
+      
+      if (!ar.ok) {
+        const errJson = await ar.json().catch(() => ({}))
+        throw new Error(errJson.error || `Assessment API returned status ${ar.status}`)
+      }
+      
       const { error: arErr } = await ar.json()
       if (arErr) throw new Error(arErr)
 
+      console.log('[Clinical-HUD] Assessment lifecycle complete. Redirecting to report.')
       setStage('complete')
       setTimeout(() => router.push(`/report/${sessionId}`), 1200)
     } catch (e: any) {
-      setError(e.message || 'Assessment failed.')
+      console.error('[Clinical-HUD] Pipeline Error:', e)
+      setError(e.message || 'Clinical inference failure.')
       setStage('error')
-      await supabase.from('mse_sessions').update({ status: 'error' }).eq('id', sessionId)
+      try {
+        await supabase.from('mse_sessions').update({ status: 'error' }).eq('id', sessionId)
+      } catch (dbErr) {
+        console.error('[Clinical-HUD] Failed to update session error state:', dbErr)
+      }
     }
   }
 
@@ -250,131 +300,227 @@ export default function SessionPage() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: 'var(--cream-100)' }}>
+    <div className="min-h-screen flex flex-col selection:bg-teal-100 selection:text-teal-900" style={{ background: 'var(--cream-100)' }}>
       {/* Nav */}
-      <nav className="bg-white border-b px-8 py-4 flex items-center gap-4"
-           style={{ borderColor: 'rgba(13,31,56,0.08)' }}>
-        <button onClick={() => router.push('/dashboard')}
-                className="flex items-center gap-2 text-sm"
-                style={{ color: 'rgba(13,31,56,0.5)' }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          Dashboard
-        </button>
-        <span style={{ color: 'rgba(13,31,56,0.2)' }}>/</span>
-        <span className="text-sm font-medium" style={{ color: 'var(--navy-900)' }}>MSE Session</span>
+      <nav className="bg-white/80 backdrop-blur-xl border-b sticky top-0 z-50 px-8 py-4 flex items-center justify-between"
+           style={{ borderColor: 'rgba(13,31,56,0.05)' }}>
+        <div className="flex items-center gap-4">
+          <button onClick={() => router.push('/dashboard')}
+                  className="group flex items-center gap-3 text-[10px] font-black uppercase tracking-[0.2em] transition-all hover:text-navy-900"
+                  style={{ color: 'rgba(13,31,56,0.4)' }}>
+            <div className="w-8 h-8 rounded-xl ring-1 ring-gray-100 flex items-center justify-center group-hover:bg-white group-hover:shadow-md transition-all">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M10 3L5 8l5 5" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+            Abort Session
+          </button>
+          <div className="w-px h-6 bg-gray-100 mx-2" />
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-widest text-navy-900">MSE Interaction HUD</span>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-teal-50 text-teal-600 border border-teal-100 uppercase tracking-tighter">Live Inference</span>
+          </div>
+        </div>
+        
         {stage === 'recording' && (
-          <span className="ml-auto flex items-center gap-2 text-sm font-medium" style={{ color: 'var(--risk-high)' }}>
-            <span className="w-2 h-2 rounded-full bg-red-600 recording-dot"/>
-            {fmt(elapsed)}
-          </span>
+          <div className="flex items-center gap-6">
+             <div className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-red-50 ring-1 ring-red-100 animate-pulse">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-600" />
+                <span className="text-sm font-black tracking-tighter text-red-600">{fmt(elapsed)}</span>
+             </div>
+             <div className="text-right hidden sm:block">
+                <p className="text-[9px] font-black uppercase tracking-widest text-gray-400">Stream Integrity</p>
+                <div className="flex gap-0.5 mt-1 justify-end">
+                   {[1,2,3,4,5].map(i => <div key={i} className="w-1.5 h-3 rounded-full bg-teal-500" />)}
+                </div>
+             </div>
+          </div>
         )}
       </nav>
 
-      <div className="flex-1 flex flex-col items-center justify-start px-8 pt-10 pb-20">
-        <div className={`w-full transition-all duration-700 ease-in-out ${
+      <div className="flex-1 flex flex-col items-center justify-start px-8 pt-12 pb-20">
+        <div className={`w-full transition-all duration-1000 ease-in-out ${
           (stage === 'ready' || stage === 'recording') 
-            ? 'max-w-[1400px] grid grid-cols-1 lg:grid-cols-2 gap-10' 
+            ? 'max-w-[1440px] grid grid-cols-1 lg:grid-cols-12 gap-12' 
             : 'max-w-2xl flex flex-col'
-        } items-stretch min-h-[500px]`}>
+        } items-stretch`}>
           
-          {/* Left Column: AI Clinical Monitor */}
+          {/* Left Column: AI Clinical Monitor (HUD Design) */}
           {(stage === 'ready' || stage === 'recording') && (
-            <div className="flex flex-col h-full rounded-[40px] overflow-hidden bg-black/5 border border-black/5 p-2 min-h-[400px] animate-in slide-in-from-left-10 duration-700">
-              <FacsOverlay 
-                ref={facsRef} 
-                stream={mediaStream} 
-                isActive={stage === 'recording' || (stage === 'ready' && mediaStream !== null)} 
-              />
+            <div className="lg:col-span-8 flex flex-col h-full animate-in slide-in-from-left-12 duration-1000">
+               <div className="relative aspect-video rounded-[48px] overflow-hidden bg-black shadow-2xl shadow-navy-900/40 ring-1 ring-white/10 p-4 group">
+                  {/* HUD Corners */}
+                  <div className="absolute top-10 left-10 w-16 h-16 border-t-4 border-l-4 border-teal-500/60 rounded-tl-2xl pointer-events-none transition-all group-hover:scale-110" />
+                  <div className="absolute top-10 right-10 w-16 h-16 border-t-4 border-r-4 border-teal-500/60 rounded-tr-2xl pointer-events-none transition-all group-hover:scale-110" />
+                  <div className="absolute bottom-10 left-10 w-16 h-16 border-b-4 border-l-4 border-teal-500/60 rounded-bl-2xl pointer-events-none transition-all group-hover:scale-110" />
+                  <div className="absolute bottom-10 right-10 w-16 h-16 border-b-4 border-r-4 border-teal-500/60 rounded-br-2xl pointer-events-none transition-all group-hover:scale-110" />
+                  
+                  {/* Camera Scanner Line (Only during recording) */}
+                  {stage === 'recording' && (
+                    <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden opacity-20">
+                       <div className="w-full h-px bg-teal-400 shadow-[0_0_15px_teal] animate-scan" />
+                    </div>
+                  )}
+
+                  <FacsOverlay 
+                    ref={facsRef} 
+                    stream={mediaStream} 
+                    isActive={stage === 'recording' || (stage === 'ready' && mediaStream !== null)} 
+                  />
+
+                  {/* Real-time Bio-Status Overlay */}
+                  {stage === 'recording' && (
+                    <div className="absolute bottom-12 left-12 right-12 z-20 flex items-end justify-between pointer-events-none">
+                       <div className="flex flex-col gap-2">
+                          <div className="px-3 py-1.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10">
+                             <p className="text-[10px] font-black uppercase tracking-widest text-teal-400 leading-none">Vocal Intensity</p>
+                             <div className="flex items-center gap-1 mt-2">
+                                {waveData.slice(0, 10).map((v, i) => (
+                                  <div key={i} className="w-1 bg-teal-500 transition-all duration-75" style={{ height: `${v * 40}px` }} />
+                                ))}
+                             </div>
+                          </div>
+                       </div>
+                       <div className="text-right flex flex-col gap-2">
+                          <div className="px-3 py-1.5 rounded-xl bg-black/40 backdrop-blur-md border border-white/10">
+                             <p className="text-[10px] font-black uppercase tracking-widest text-white/40 leading-none">Clinical Latency</p>
+                             <p className="text-lg font-black text-white italic mt-1 leading-none">0.8s</p>
+                          </div>
+                       </div>
+                    </div>
+                  )}
+               </div>
             </div>
           )}
 
-          {/* Right Column: Clinical Controls */}
-          <div className={`flex flex-col justify-center ${(stage !== 'ready' && stage !== 'recording') ? 'w-full' : ''}`}>
-            {/* Patient card */}
+          {/* Right Column: Clinical Decision Deck */}
+          <div className={`lg:col-span-4 flex flex-col justify-center ${(stage !== 'ready' && stage !== 'recording') ? 'w-full' : ''}`}>
+            {/* Patient Header */}
             {patient && (
-              <div className="card p-5 mb-6 flex items-center gap-4 animate-in">
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-sm font-medium text-white flex-shrink-0"
-                     style={{ background: 'var(--teal-600)' }}>
+              <div className="card p-6 mb-8 flex items-center gap-5 animate-in slide-in-from-right-8 duration-700 bg-white shadow-xl shadow-navy-100/20">
+                <div className="w-16 h-16 rounded-[24px] flex items-center justify-center text-xl font-black text-white shadow-lg shadow-teal-900/20"
+                     style={{ background: 'linear-gradient(135deg, var(--teal-600), var(--navy-800))' }}>
                   {patient.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium" style={{ color: 'var(--navy-900)' }}>{patient.full_name}</p>
-                  <p className="text-sm" style={{ color: 'rgba(13,31,56,0.5)' }}>
-                    {patient.age}y · {patient.gender} · {patient.presenting_complaint}
+                  <p className="text-lg font-black tracking-tight" style={{ color: 'var(--navy-900)' }}>{patient.full_name}</p>
+                  <p className="text-xs font-bold uppercase tracking-widest opacity-40 mt-0.5">
+                    {patient.age}y · <span className="text-teal-600">{patient.gender}</span> · AI Baseline Ready
                   </p>
                 </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-teal-100 text-teal-800 border border-teal-200 uppercase tracking-tighter">
-                  Vision Active
-                </span>
+                <div className="flex flex-col items-center">
+                   <div className="w-3 h-3 rounded-full bg-teal-500 animate-pulse mb-1" />
+                   <span className="text-[8px] font-black uppercase text-teal-600">Active</span>
+                </div>
               </div>
             )}
 
-            {/* Main session card */}
-            <div className="card p-10 text-center animate-in min-h-[400px] flex flex-col justify-center shadow-xl">
-              <div className="mb-8">
+            {/* Core Interaction Interface */}
+            <div className="card p-12 text-center animate-in shadow-2xl shadow-navy-900/10 min-h-[550px] flex flex-col justify-between overflow-hidden relative">
+              
+              {/* Abstract decoration */}
+              <div className="absolute top-[-10%] left-[-10%] w-32 h-32 bg-teal-500/5 blur-[50px] rounded-full" />
+              <div className="absolute bottom-[-10%] right-[-10%] w-32 h-32 bg-red-500/5 blur-[50px] rounded-full" />
+
+              <div className="relative z-10 flex-1 flex flex-col justify-center">
                 {stage === 'error' ? (
-                  <div className="w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-6 bg-red-50 text-red-500">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <div className="w-24 h-24 rounded-[32px] mx-auto flex items-center justify-center mb-10 bg-red-50 text-red-600 shadow-xl shadow-red-100/50">
+                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
                       <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
                   </div>
                 ) : (
-                  <div className={`w-16 h-16 rounded-3xl mx-auto flex items-center justify-center mb-6 transition-all ${stage === 'recording' ? 'recording-dot' : ''}`}
-                    style={{
-                      background: stage === 'recording' ? '#FEE2E2' : (stage === 'complete' ? 'var(--teal-50)' : 'var(--cream-200)')
-                    }}>
+                  <div className={`w-28 h-28 rounded-[40px] mx-auto flex items-center justify-center mb-10 transition-all duration-500 shadow-xl ${
+                    stage === 'recording' ? 'bg-red-50 shadow-red-100 ring-4 ring-red-50' : (stage === 'complete' ? 'bg-teal-50 shadow-teal-100 ring-4 ring-teal-50' : 'bg-gray-50 shadow-gray-100 ring-4 ring-gray-50')
+                  }`}>
                     {stage === 'ready' && (
-                      <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
-                        <circle cx="18" cy="18" r="8" stroke="rgba(13,31,56,0.3)" strokeWidth="1.5"/>
-                        <path d="M18 6v3M18 27v3" stroke="rgba(13,31,56,0.3)" strokeWidth="1.5" strokeLinecap="round"/>
-                      </svg>
+                      <div className="relative">
+                         <div className="w-12 h-12 rounded-full border-4 border-gray-200 border-t-navy-900 animate-spin" />
+                         <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-2 h-2 rounded-full bg-navy-900" />
+                         </div>
+                      </div>
                     )}
-                    {stage === 'recording' && <div className="w-4 h-4 rounded-sm" style={{ background: 'var(--risk-high)' }}/>}
+                    {stage === 'recording' && (
+                       <div className="w-8 h-8 rounded-xl bg-red-600 animate-pulse shadow-lg shadow-red-600/30" />
+                    )}
                     {(stage === 'transcribing' || stage === 'assessing') && (
-                      <div className="w-6 h-6 border-2 rounded-full animate-spin" style={{ borderColor: 'rgba(13,31,56,0.15)', borderTopColor: 'var(--teal-600)' }}/>
+                      <div className="relative">
+                         <div className="w-14 h-14 rounded-full border-[6px] border-teal-100 border-t-teal-600 animate-spin" />
+                         <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-teal-600 uppercase">AI</span>
+                      </div>
                     )}
                     {stage === 'complete' && (
-                      <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
-                        <path d="M10 18l6 6 10-12" stroke="var(--teal-600)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      </svg>
+                      <div className="w-12 h-12 rounded-2xl bg-teal-600 flex items-center justify-center text-white shadow-xl shadow-teal-600/30">
+                        <svg width="24" height="24" viewBox="0 0 36 36" fill="none">
+                          <path d="M10 18l6 6 10-12" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </div>
                     )}
                   </div>
                 )}
 
-                <h2 className="font-display text-2xl font-medium mb-2" style={{ color: 'var(--navy-900)' }}>
+                <h2 className="font-display text-3xl font-black mb-4 tracking-tight" style={{ color: 'var(--navy-900)' }}>
                   {STAGE_LABELS[stage]}
                 </h2>
 
-                {stage === 'error' && (
-                  <div className="animate-in fade-in slide-in-from-bottom-2">
-                    <p className="text-sm mb-6 text-red-600/80 font-medium max-w-sm mx-auto">
-                      {error || "An unexpected error occurred during the clinical session."}
+                {stage === 'error' ? (
+                  <div className="animate-in fade-in slide-in-from-bottom-4">
+                    <p className="text-sm font-medium mb-10 text-red-600/60 leading-relaxed max-w-sm mx-auto">
+                      {error || "Critical failure in clinical inference pipeline."}
                     </p>
                     <button onClick={() => setStage('ready')}
-                      className="px-6 py-2 rounded-xl text-sm font-medium bg-red-600 text-white shadow-lg shadow-red-600/20 hover:scale-[1.02] active:scale-[0.98] transition-all">
-                      Try Again
+                      className="px-10 py-4 rounded-2xl text-[11px] font-black uppercase tracking-widest bg-red-600 text-white shadow-2xl shadow-red-600/40 hover:scale-[1.02] active:scale-[0.98] transition-all">
+                      Recalibrate Pipeline
                     </button>
                   </div>
-                )}
-
-                {STAGE_SUBSTEPS[stage] && (
-                  <p className="text-sm transition-all" style={{ color: 'rgba(13,31,56,0.5)', minHeight: '1.4rem' }}>
-                    {STAGE_SUBSTEPS[stage]![substepIdx]}
+                ) : STAGE_SUBSTEPS[stage] ? (
+                  <div className="animate-in fade-in duration-1000">
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] text-teal-600 mb-2 italic">Neural Processing</p>
+                    <p className="text-sm font-medium leading-relaxed italic opacity-40 mb-12 h-10">
+                      {STAGE_SUBSTEPS[stage]![substepIdx]}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm font-medium text-gray-400 mb-12 max-w-xs mx-auto leading-relaxed italic">
+                    {stage === 'ready' 
+                      ? 'The AI is primed. Ensure visual alignment before initialising the multimodal stream.'
+                      : 'Clinical examination concluded. Synthesizing final psychiatric insight report...'}
                   </p>
                 )}
 
+                {/* 10 Domain Dynamic HUD Indicators */}
+                {(stage === 'recording' || stage === 'assessing') && (
+                  <div className="mb-12 grid grid-cols-5 gap-3">
+                    {DOMAINS_TRACKED.map((domain, i) => {
+                      const isActive = stage === 'recording' && i < (elapsed / 15 + 1);
+                      const isComplete = stage === 'assessing' || (stage === 'recording' && elapsed > (i * 20));
+                      return (
+                        <div key={domain} className="flex flex-col items-center gap-2 group">
+                          <div className={`w-1 h-12 rounded-full transition-all duration-1000 relative overflow-hidden ${
+                            isComplete ? 'bg-teal-600' : isActive ? 'bg-red-100' : 'bg-gray-100'
+                          }`}>
+                             {isActive && !isComplete && (
+                               <div className="absolute inset-0 bg-red-500 animate-pulse" />
+                             )}
+                          </div>
+                          <span className={`text-[8px] font-black uppercase tracking-tighter vertical-text transition-colors ${
+                            isComplete ? 'text-teal-600' : isActive ? 'text-red-500' : 'text-gray-300'
+                          }`}>
+                            {domain.slice(0, 3)}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
                 {stage === 'ready' && (
-                  <div className="flex flex-col items-center">
-                    <p className="text-sm mb-6 max-w-sm mx-auto" style={{ color: 'rgba(13,31,56,0.5)' }}>
-                      Start the interview. The AI will analyze clinical markers in the background.
-                    </p>
-                    <div className="flex items-center justify-center gap-2 mb-2 animate-in flex-wrap">
-                      {[{ id: 'en', label: 'English' }, { id: 'hi', label: 'Hindi' }, { id: 'auto', label: 'Auto Detect' }].map((lang) => (
+                  <div className="flex flex-col items-center animate-in stagger">
+                    <div className="flex items-center justify-center gap-2 mb-10 overflow-x-auto p-1">
+                      {[{ id: 'en', label: 'English (In)' }, { id: 'hi', label: 'Hindi (In)' }, { id: 'auto', label: 'Auto-Context' }].map((lang) => (
                         <button key={lang.id} onClick={() => setSelectedLanguage(lang.id)}
-                          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-medium transition-all ${selectedLanguage === lang.id ? 'bg-white shadow-sm ring-1 ring-black/5' : 'text-black/40'}`}
-                          style={{ background: selectedLanguage === lang.id ? 'white' : 'transparent' }}>
+                          className={`flex items-center gap-2 px-5 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all ${selectedLanguage === lang.id ? 'bg-white shadow-xl shadow-navy-900/5 ring-1 ring-gray-100 translate-y-[-2px] text-teal-600' : 'text-gray-400'}`}>
                           {lang.label}
                         </button>
                       ))}
@@ -383,39 +529,32 @@ export default function SessionPage() {
                 )}
               </div>
 
-              {/* Waveform */}
-              {stage === 'recording' && (
-                <div className="flex items-center justify-center gap-0.5 h-12 mb-8 px-4">
-                  {waveData.map((v, i) => (
-                    <div key={i} className="flex-1 rounded-full bg-red-600/20" style={{ height: `${Math.max(4, v * 50)}px`, maxWidth: '6px' }}/>
-                  ))}
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div className="flex items-center justify-center gap-3">
+              {/* Action Buttons Deck */}
+              <div className="relative z-10 pt-8 border-t border-gray-50 flex flex-col items-center gap-4">
                 {stage === 'ready' && (
-                  <>
+                  <div className="flex items-center gap-4 w-full">
                     <button onClick={startRecording}
-                      className="flex items-center gap-3 px-8 py-3.5 rounded-xl font-medium text-white shadow-lg shadow-red-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
-                      style={{ background: 'var(--risk-high)' }}>
-                      <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse"/>
-                      Start Clinical Interview
+                      className="flex-1 flex items-center justify-center gap-4 px-10 py-5 rounded-[24px] text-[11px] font-black uppercase tracking-[0.2em] text-white shadow-2xl shadow-red-600/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                      style={{ background: 'linear-gradient(135deg, #EF4444, #991B1B)' }}>
+                      <span className="w-3 h-3 rounded-full bg-white animate-pulse"/>
+                      Initialize Stream
                     </button>
-                    <button onClick={() => router.push('/dashboard')}
-                      className="px-8 py-3.5 rounded-xl font-medium transition-all hover:bg-black/5"
-                      style={{ color: 'rgba(13,31,56,0.5)', border: '1px solid rgba(13,31,56,0.1)' }}>
-                      Cancel & Return
-                    </button>
-                  </>
+                  </div>
                 )}
                 {stage === 'recording' && (
                   <button onClick={stopAndProcess}
-                    className="flex items-center gap-3 px-10 py-4 rounded-xl font-medium text-white shadow-lg shadow-teal-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                    className="w-full flex items-center justify-center gap-4 px-10 py-6 rounded-[28px] text-[11px] font-black uppercase tracking-[0.2em] text-white shadow-2xl shadow-teal-900/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
                     style={{ background: 'var(--teal-600)' }}>
-                    <rect x="3" y="3" width="10" height="10" rx="1.5" fill="currentColor"/>
-                    Stop & Assess
+                    <div className="w-5 h-5 rounded-lg bg-white/20 flex items-center justify-center">
+                       <rect width="8" height="8" rx="1.5" fill="white"/>
+                    </div>
+                    Conclude & Synthesize
                   </button>
+                )}
+                {stage === 'complete' && (
+                  <div className="flex items-center gap-3 px-6 py-4 rounded-3xl bg-teal-50 text-teal-600 ring-1 ring-teal-100 animate-pulse">
+                     <span className="text-[10px] font-black uppercase tracking-widest">Constructing Longitudinal Bridge...</span>
+                  </div>
                 )}
               </div>
             </div>

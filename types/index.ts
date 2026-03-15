@@ -26,6 +26,13 @@ export interface Patient {
   education?: string
   occupation?: string
   consent_obtained: boolean
+  digital_consent_timestamp?: string
+  eligibility_status?: 'pending' | 'eligible' | 'ineligible'
+  ehr_id?: string
+  current_stressors?: string
+  collateral_information?: string
+  living_situation?: string
+  legal_history?: string
   created_at: string
   updated_at: string
 }
@@ -38,10 +45,16 @@ export interface MSEDomainScore {
 }
 
 export interface MSEAssessment {
-  mood_affect: MSEDomainScore & {
-    mood_quality: string
-    affect_range: 'full' | 'restricted' | 'flat' | 'labile' | 'blunted'
-    mood_congruence: boolean
+  appearance: MSEDomainScore & {
+    grooming: string
+    dress: string
+    physical_characteristics: string[]
+  }
+  behavior: MSEDomainScore & {
+    activity_level: string        // e.g. psychomotor agitation, retardation
+    eye_contact: string
+    rapport: string
+    abnormal_movements: string[]
   }
   speech: MSEDomainScore & {
     rate: 'normal' | 'slow' | 'fast' | 'pressured' | 'mute'
@@ -49,14 +62,14 @@ export interface MSEAssessment {
     coherence: 'coherent' | 'loosely_associated' | 'incoherent' | 'tangential' | 'circumstantial'
     fluency: 'fluent' | 'dysarthric' | 'stuttering' | 'latent'
   }
-  thought_content: MSEDomainScore & {
-    suicidal_ideation: boolean
-    suicidal_ideation_detail?: string
-    homicidal_ideation: boolean
-    delusions_present: boolean
-    delusion_types: string[]
-    obsessions: boolean
-    paranoid_themes: boolean
+  mood: MSEDomainScore & {
+    quality: 'euthymic' | 'depressed' | 'anxious' | 'irritable' | 'euphoric' | 'dysphoric'
+    intensity: string
+  }
+  affect: MSEDomainScore & {
+    range: 'full' | 'restricted' | 'flat' | 'labile' | 'blunted'
+    congruence: boolean
+    stability: string
   }
   thought_process: MSEDomainScore & {
     organization: 'organized' | 'disorganized'
@@ -66,18 +79,29 @@ export interface MSEAssessment {
     thought_blocking: boolean
     perseveration: boolean
   }
-  perception?: MSEDomainScore & {
+  thought_content: MSEDomainScore & {
+    suicidal_ideation: boolean
+    homicidal_ideation: boolean
+    delusions_present: boolean
+    delusion_types: string[]
+    obsessions: boolean
+    paranoid_themes: boolean
+  }
+  perception: MSEDomainScore & {
     hallucinations_present: boolean
     hallucination_types: string[]
     illusions: boolean
     depersonalization: boolean
     derealization: boolean
   }
-  insight: MSEDomainScore & {
+  cognition: MSEDomainScore & {
+    orientation: string[]        // e.g. time, place, person
+    attention_concentration: string
+    memory_recall: string
+  }
+  insight_judgment: MSEDomainScore & {
     illness_awareness: 'full' | 'partial' | 'none'
     treatment_acceptance: 'willing' | 'ambivalent' | 'refusing'
-  }
-  judgment: MSEDomainScore & {
     decision_making: 'intact' | 'impaired' | 'severely_impaired'
     social_judgment: 'intact' | 'impaired'
   }
@@ -93,6 +117,14 @@ export interface RiskAssessment {
   recommended_actions: string[]
 }
 
+export interface InterventionPlan {
+  pharmacological: string[]
+  psychotherapeutic: string[]
+  lifestyle_recommendations: string[]
+  crisis_plan: string
+  next_follow_up: string
+}
+
 export interface MSESession {
   id: string
   patient_id: string
@@ -100,12 +132,14 @@ export interface MSESession {
   transcript: string
   audio_duration_seconds?: number
   assessment: MSEAssessment | null
+  validated_domains?: string[] // Phase 5: List of domain keys validated by clinician
   risk_assessment: RiskAssessment | null
   overall_severity: number   // 0–100
   clinical_summary: string
   diagnostic_impression?: string
   clinician_notes?: string
   clinician_overrides?: Partial<MSEAssessment>
+  intervention_plan: InterventionPlan | null // Phase 6: Plan
   session_date: string
   status: 'recording' | 'transcribing' | 'assessing' | 'complete' | 'error'
   facs_data?: FACSAssessment
@@ -138,6 +172,7 @@ export interface FACSAssessment {
   affect_range_score: number
   congruence_score: number
   emotion_timeline: FACSFrame[]
+  keyframes?: string[] // Base64 or URLs to clinical highlights
   score: number
   severity: 'normal' | 'mild' | 'moderate' | 'severe'
   observations: string[]

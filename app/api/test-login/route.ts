@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 import { createClient } from '@supabase/supabase-js'
 
 export async function POST(req: NextRequest) {
@@ -73,23 +74,29 @@ export async function POST(req: NextRequest) {
       // We don't necessarily want to fail login if profile upsert fails, but let's log it
     }
 
-    // 4. Set cookies and return session
+    // 4. Set cookies via createServerClient
     const res = NextResponse.json({ 
       user: signInData.user, 
       session: signInData.session 
     })
 
-    // Manual cookie setting for @supabase/ssr
-    const cookieOptions = { 
-      path: '/', 
-      httpOnly: true, 
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax' as const,
-      maxAge: signInData.session.expires_in
-    }
+    const supabaseResponse = createServerClient(
+      supabaseUrl,
+      anonKey,
+      {
+        cookies: {
+          getAll() { return req.cookies.getAll() },
+          setAll(cookiesToSet: { name: string, value: string, options: any }[]) {
+            cookiesToSet.forEach(({ name, value, options }) =>
+              res.cookies.set(name, value, options)
+            )
+          },
+        },
+      }
+    )
 
-    res.cookies.set('sb-jyewfipikrrsjgmvpcgu-auth-token.0', signInData.session.access_token, cookieOptions)
-    res.cookies.set('sb-jyewfipikrrsjgmvpcgu-auth-token.1', signInData.session.refresh_token, cookieOptions)
+    // This will set the session cookies in 'res' correctly
+    await supabaseResponse.auth.setSession(signInData.session)
 
     console.log('[TestLogin] Login successful')
     return res

@@ -36,13 +36,22 @@ export async function POST(req: NextRequest) {
 
     // Convert the Blob to a Float32Array
     const arrayBuffer = await audioBlob.arrayBuffer()
-    const audioData = new Float32Array(arrayBuffer)
-    console.log(`[API/Transcribe] Buffer decoded. Length: ${audioData.length}`)
+    
+    // Safety check: Ensure the buffer is a multiple of 4 for Float32Array
+    const float32Length = Math.floor(arrayBuffer.byteLength / 4)
+    const audioData = new Float32Array(arrayBuffer, 0, float32Length)
+    
+    console.log(`[API/Transcribe] Buffer decoded. Byte length: ${arrayBuffer.byteLength}, Float32 length: ${audioData.length}`)
+
+    if (audioData.length === 0) {
+      console.error('[API/Transcribe] Audio data is empty after decoding')
+      return NextResponse.json({ error: 'Audio data is empty' }, { status: 400 })
+    }
 
     // Load pipeline
-    console.log('[API/Transcribe] Loading Whisper small...')
+    console.log('[API/Transcribe] Loading Whisper small singleton...')
     const transcriber = await PipelineSingleton.getInstance()
-    console.log('[API/Transcribe] Whisper model ready.')
+    console.log('[API/Transcribe] Whisper model initialized and ready.')
 
     // Pass the raw float32array to Whisper
     console.log('[API/Transcribe] Running inference...')

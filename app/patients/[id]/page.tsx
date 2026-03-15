@@ -34,10 +34,10 @@ export default function PatientLongitudinalPage() {
   if (loading) return <div className="p-20 text-center">Loading longitudinal data...</div>
 
   const chartData = sessions.map(s => ({
-    date: new Date(s.session_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }),
-    severity: s.overall_severity,
-    mood: (s.assessment?.mood_affect as any)?.score || 0,
-    insight: (s.assessment?.insight as any)?.score || 0,
+    date: s.session_date ? new Date(s.session_date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short' }) : 'N/A',
+    severity: s.overall_severity || 0,
+    mood: (s.assessment?.mood as any)?.score || 0,
+    insight: (s.assessment?.insight_judgment as any)?.score || 0,
   }))
 
   return (

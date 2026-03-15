@@ -25,20 +25,19 @@ export default function TrailMaking({ onComplete }: Props) {
   const generateNodes = () => {
     const newNodes = []
     const count = 13
-    const padding = 60
     
     for (let i = 1; i <= count; i++) {
       let x, y, overlap
       let attempts = 0
       do {
         overlap = false
-        x = Math.random() * 80 + 10 // 10% to 90%
-        y = Math.random() * 80 + 10
+        x = Math.random() * 70 + 15
+        y = Math.random() * 70 + 15
         
         for (const node of newNodes) {
           const dx = node.x - x
           const dy = node.y - y
-          if (Math.sqrt(dx*dx + dy*dy) < 15) overlap = true
+          if (Math.sqrt(dx*dx + dy*dy) < 18) overlap = true
         }
         attempts++
       } while (overlap && attempts < 100)
@@ -59,7 +58,6 @@ export default function TrailMaking({ onComplete }: Props) {
       }
     } else if (!completed.includes(id)) {
       setErrors(e => e + 1)
-      // Highlight error briefly
     }
   }
 
@@ -71,12 +69,12 @@ export default function TrailMaking({ onComplete }: Props) {
     let severity = 'normal'
     
     if (isTimeout) {
-      score = 90
+      score = 88
       severity = 'severe'
     } else {
       const seconds = (duration || 0) / 1000
-      if (seconds > 90 || errors > 2) { score = 65; severity = 'moderate' }
-      else if (seconds > 60) { score = 35; severity = 'mild' }
+      if (seconds > 90 || errors > 2) { score = 61; severity = 'moderate' }
+      else if (seconds > 60) { score = 31; severity = 'mild' }
     }
 
     onComplete({
@@ -88,7 +86,6 @@ export default function TrailMaking({ onComplete }: Props) {
     })
   }
 
-  // Timeout after 90s
   useEffect(() => {
     if (stage === 'test') {
       const t = setTimeout(() => finish(true), 90000)
@@ -97,26 +94,36 @@ export default function TrailMaking({ onComplete }: Props) {
   }, [stage])
 
   return (
-    <div className="flex flex-col items-center justify-center p-8 space-y-8 animate-in h-full w-full">
-      <div className="text-center">
-        <h2 className="font-display text-3xl mb-2" style={{ color: 'var(--navy-900)' }}>Trail Making Test</h2>
-        <p className="text-sm text-gray-500">Executive Function & Processing Speed</p>
+    <div className="flex-1 flex flex-col items-center justify-center p-12 space-y-10 animate-in duration-500 w-full h-full">
+      <div className="text-center space-y-2">
+        <h2 className="font-display text-4xl font-black text-navy-900 tracking-tight">Trail Making (Level A)</h2>
+        <div className="flex items-center justify-center gap-2">
+           <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+           <p className="text-[10px] font-black uppercase tracking-[0.2em] text-navy-900/40">Domain: Executive Function & Motor Speed</p>
+        </div>
       </div>
 
       {stage === 'intro' && (
-        <div className="text-center space-y-6">
-          <p className="max-w-md text-gray-600">
-            Tap the numbers in order as fast as you can: 1 → 2 → 3 ... up to 13.
-          </p>
-          <button onClick={startTest} className="px-10 py-3 rounded-xl bg-teal-600 text-white font-medium hover:bg-teal-700 transition-colors">
-            Start Test
+        <div className="text-center space-y-8 animate-in slide-in-from-bottom-4">
+          <div className="p-8 rounded-[32px] bg-teal-50 border border-teal-100/50 max-w-sm mx-auto">
+            <p className="text-sm font-medium leading-relaxed text-teal-800">
+               Connect the numeric markers sequentially from <span className="font-black underline underline-offset-4 decoration-teal-300">1 through 13</span>. Prioritize speed and accuracy.
+            </p>
+          </div>
+          <button 
+            onClick={startTest} 
+            className="group flex items-center gap-4 px-10 py-5 rounded-2xl bg-teal-600 text-white font-black text-[11px] uppercase tracking-[0.2em] shadow-2xl shadow-teal-900/20 hover:scale-105 active:scale-95 transition-all"
+          >
+            Launch Visual Trail
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
           </button>
         </div>
       )}
 
       {stage === 'test' && (
-        <div ref={containerRef} className="relative w-full max-w-xl aspect-square bg-white rounded-3xl shadow-inner border border-gray-100 overflow-hidden">
-          {/* Lines */}
+        <div ref={containerRef} className="relative w-full max-w-xl aspect-square bg-navy-50/30 rounded-[48px] shadow-inner border border-navy-900/5 overflow-hidden animate-in zoom-in-95 duration-700">
           <svg className="absolute inset-0 w-full h-full pointer-events-none">
             {completed.map((id, i) => {
               if (i === 0) return null
@@ -127,28 +134,31 @@ export default function TrailMaking({ onComplete }: Props) {
                   key={i}
                   x1={`${from.x}%`} y1={`${from.y}%`}
                   x2={`${to.x}%`} y2={`${to.y}%`}
-                  stroke="var(--teal-400)"
-                  strokeWidth="3"
+                  stroke="var(--teal-500)"
+                  strokeWidth="4"
                   strokeLinecap="round"
-                  className="animate-in fade-in"
+                  className="animate-in fade-in transition-all duration-500"
+                  style={{ filter: 'drop-shadow(0 0 8px rgba(20,184,166,0.3))' }}
                 />
               )
             })}
           </svg>
 
-          {/* Nodes */}
           {nodes.map(node => (
             <button
               key={node.id}
               onClick={() => handleNodeClick(node.id)}
-              className={`absolute w-12 h-12 -ml-6 -mt-6 rounded-full flex items-center justify-center font-bold transition-all shadow-sm border-2 ${
+              className={`absolute w-14 h-14 -ml-7 -mt-7 rounded-full flex items-center justify-center font-black transition-all shadow-xl group ${
                 completed.includes(node.id) 
-                  ? 'bg-teal-600 border-teal-600 text-white' 
-                  : 'bg-white border-gray-200 text-gray-700 hover:border-teal-400'
+                  ? 'bg-teal-600 border-4 border-teal-400 text-white scale-90' 
+                  : 'bg-white border-2 border-navy-900/10 text-navy-900 hover:border-teal-500 hover:scale-110'
               }`}
               style={{ left: `${node.x}%`, top: `${node.y}%`, zIndex: 10 }}
             >
               {node.id}
+              {completed[completed.length-1] === node.id && (
+                 <div className="absolute inset-[-4px] rounded-full border-2 border-teal-500 animate-ping opacity-30" />
+              )}
             </button>
           ))}
         </div>
