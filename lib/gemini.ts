@@ -9,7 +9,7 @@ export interface AssessmentResult {
   diagnostic_impression: string
 }
 
-const OLLAMA_HOST = '127.0.0.1'
+const OLLAMA_HOST = process.env.OLLAMA_HOST || '127.0.0.1'
 const OLLAMA_PORT = 11434
 
 /**
