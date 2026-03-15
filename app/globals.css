@@ -1,0 +1,94 @@
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,400&family=DM+Mono:wght@400;500&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --cream-50:  #FDFBF7;
+  --cream-100: #F8F4EC;
+  --cream-200: #F0EAD8;
+  --navy-900:  #0A1628;
+  --navy-800:  #0D1F38;
+  --teal-600:  #0B6E4F;
+  --teal-400:  #12A876;
+  --risk-high: #B91C1C;
+  --risk-med:  #D97706;
+  --risk-low:  #059669;
+}
+
+* { box-sizing: border-box; }
+
+html {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background-color: var(--cream-100);
+  color: var(--navy-900);
+  -webkit-font-smoothing: antialiased;
+}
+
+body { min-height: 100vh; }
+
+/* ── Typography ─────────────────────────────────────────── */
+.font-display { font-family: 'Fraunces', Georgia, serif; }
+
+/* ── Clinical card ──────────────────────────────────────── */
+.card {
+  background: white;
+  border: 1px solid rgba(13,31,56,0.10);
+  border-radius: 1rem;
+  box-shadow: 0 1px 3px rgba(13,31,56,0.05), 0 4px 16px rgba(13,31,56,0.04);
+}
+
+/* ── Severity colours ───────────────────────────────────── */
+.severity-normal   { color: var(--risk-low);  background: #ECFDF5; }
+.severity-mild     { color: #92400E;          background: #FFFBEB; }
+.severity-moderate { color: var(--risk-med);  background: #FFFBEB; }
+.severity-severe   { color: var(--risk-high); background: #FEF2F2; }
+
+/* ── Risk pill ──────────────────────────────────────────── */
+.risk-none     { background: #ECFDF5; color: #065F46; }
+.risk-low      { background: #FEF9C3; color: #713F12; }
+.risk-moderate { background: #FEF3C7; color: #92400E; }
+.risk-high     { background: #FEE2E2; color: #991B1B; }
+.risk-imminent { background: #B91C1C; color: white; animation: pulse-ring 1.5s infinite; }
+
+/* ── Score bar ──────────────────────────────────────────── */
+.score-bar-track {
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(13,31,56,0.08);
+  overflow: hidden;
+}
+.score-bar-fill {
+  height: 100%;
+  border-radius: 9999px;
+  transition: width 1s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Recording pulse ────────────────────────────────────── */
+@keyframes recordPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(185, 28, 28, 0.4); }
+  50%       { box-shadow: 0 0 0 12px rgba(185, 28, 28, 0); }
+}
+.recording-dot { animation: recordPulse 1.5s ease-in-out infinite; }
+
+/* ── Fade animations ────────────────────────────────────── */
+.animate-in {
+  animation: fadeUp 0.4s ease forwards;
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* staggered children */
+.stagger > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger > *:nth-child(2) { animation-delay: 0.10s; }
+.stagger > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger > *:nth-child(4) { animation-delay: 0.20s; }
+.stagger > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger > *:nth-child(6) { animation-delay: 0.30s; }
+
+/* ── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(13,31,56,0.15); border-radius: 9999px; }
