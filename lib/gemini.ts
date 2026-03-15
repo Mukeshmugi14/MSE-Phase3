@@ -16,12 +16,12 @@ const OLLAMA_PORT = 11434
  * Check if Ollama is running and reachable.
  */
 async function checkOllamaHealth(): Promise<void> {
-  try {
+    console.log(`[Clinical-AI] Checking Ollama health at http://${OLLAMA_HOST}:${OLLAMA_PORT}/api/tags ...`)
     const res = await fetch(`http://${OLLAMA_HOST}:${OLLAMA_PORT}/api/tags`, {
       signal: AbortSignal.timeout(10000),
     })
     if (!res.ok) {
-      throw new Error(`Ollama returned status ${res.status}`)
+      throw new Error(`Ollama returned status ${res.status} for ${OLLAMA_HOST}`)
     }
     const data = await res.json()
     console.log(`[Clinical-AI] Ollama is running. Available models: ${data.models?.map((m: any) => m.name).join(', ') || 'none'}`)
