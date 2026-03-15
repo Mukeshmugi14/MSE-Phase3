@@ -48,11 +48,16 @@ After the build completes, the AI-MSE platform will be running and accessible at
 👉 **http://localhost:3000**
 
 ## Managing the Container
-- To **stop** the application:
-  ```bash
-  docker-compose down
-  ```
-- To **view the live console logs**:
-  ```bash
-  docker logs -f ai-mse-web
-  ```
+| Action | Command |
+| :--- | :--- |
+| **Stop** (pause) | `docker-compose stop` |
+| **Start Again** | `docker-compose start` |
+| **Shut Down** (clean) | `docker-compose down` |
+| **Complete Fresh Start** | `docker-compose --env-file .env.local up --build -d` |
+| **View Logs** | `docker logs -f ai-mse-web` |
+
+### Troubleshooting "Failed to Fetch"
+If you get a "Failed to Fetch" error during login:
+1. Ensure the container is actually running: `docker ps`
+2. Check internal server logs: `docker logs ai-mse-web`
+3. If logs show missing variables, ensure your `.env.local` is present in the root folder.
