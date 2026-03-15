@@ -9,9 +9,16 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email is required' }, { status: 400 })
     }
 
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+    const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+
+    console.log(`[TestLogin] Runtime check - URL exists: ${!!supabaseUrl}, ServiceKey exists: ${!!serviceKey}, AnonKey exists: ${!!anonKey}`)
+
+    if (!supabaseUrl || !serviceKey || !anonKey) {
+      console.error('[TestLogin] Missing environment variables!')
+      return NextResponse.json({ error: 'Server configuration error: missing API keys' }, { status: 500 })
+    }
 
     // Admin client for backend operations
     const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
