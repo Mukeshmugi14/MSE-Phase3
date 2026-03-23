@@ -1,11 +1,14 @@
 #!/bin/bash
 echo "Starting AI-MSE with Ollama..."
-docker-compose up -d --build
+# Use .env.local if it exists
+if [ -f .env.local ]; then
+  docker-compose --env-file .env.local up -d --build
+else
+  docker-compose up -d --build
+fi
 
-echo "Waiting for Ollama to be ready..."
-sleep 5
-
-echo "Pulling gemma3:4b model (this may take a while the first time)..."
-docker exec -it ollama ollama pull gemma3:4b
-
-echo "Success! The application is ready at http://localhost:3000"
+echo "Waiting for services to initialize..."
+# The backend will wait for Ollama to be healthy and the model to be pulled
+# but we can still show a friendly message.
+echo "Ollama is pre-loading gemma3:4b (first-time only). Check status with: docker logs -f ollama-pull-model"
+echo "Success! The application will be reachable at http://localhost:3000"

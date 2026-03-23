@@ -18,33 +18,47 @@ const OLLAMA_PORT = 11434
  */
 async function checkOllamaHealth(): Promise<void> {
   const host = getOllamaHost()
-  console.log(`[Clinical-AI] Checking Ollama health at http://${host}:${OLLAMA_PORT}/api/tags ...`)
+  const port = OLLAMA_PORT
+  const urls = [`http://${host}:${port}/api/tags`]
+  
+  // Fallback for local development if running outside Docker
+  if (host === 'ollama') {
+    urls.push(`http://localhost:${port}/api/tags`)
+  }
+
+  console.log(`[Clinical-AI] Probing Ollama endpoints: ${urls.join(', ')}`)
   
   let attempts = 0;
-  const maxAttempts = 10;
+  const maxAttempts = 15;
+  const retryDelay = 2000;
   
   while (attempts < maxAttempts) {
-    try {
-      const res = await fetch(`http://${host}:${OLLAMA_PORT}/api/tags`, {
-        signal: AbortSignal.timeout(5000),
-      })
-      if (res.ok) {
-        const data = await res.json()
-        console.log(`[Clinical-AI] Ollama is running. Available models: ${data.models?.map((m: any) => m.name).join(', ') || 'none'}`)
-        return;
-      }
-    } catch (err: any) {
-      console.log(`[Clinical-AI] Ollama unreachable, retrying (${attempts + 1}/${maxAttempts})...`);
-    }
     attempts++;
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, {
+          signal: AbortSignal.timeout(3000),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          console.log(`[Clinical-AI] Connection established to ${url}. Available models: ${data.models?.map((m: any) => m.name).join(', ') || 'none'}`)
+          return;
+        }
+      } catch (err: any) {
+        // Continue to check other URL or retry
+      }
+    }
+    
+    console.log(`[Clinical-AI] Attempt ${attempts}/${maxAttempts}: Ollama unreachable on all endpoints. Retrying in ${retryDelay/1000}s...`);
+    
     if (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, retryDelay));
     }
   }
   
   throw new Error(
-    `Ollama is not running or unreachable at ${host}:${OLLAMA_PORT} after ${maxAttempts} attempts. ` +
-    `Please check Docker networking.`
+    `Ollama unreachable at ${host}:${port} after ${maxAttempts} attempts. ` +
+    `Ensure Docker container is running and healthy.`
   )
 }
 
