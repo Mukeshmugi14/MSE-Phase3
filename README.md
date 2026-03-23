@@ -39,9 +39,10 @@ An advanced, multimodal psychiatric assessment platform built to modernize the t
 
 ---
 
-## 🐳 Docker Deployment (Recommended)
-
 To run the application in a production-ready, isolated container environment on your local system, follow these steps:
+
+> [!TIP]
+> **New to Docker?** Check the [**Deployment Guide**](file:///c:/Users/HP/Downloads/ai-mse-prototype/ai-mse/DEPLOYMENT_GUIDE.md) for a step-by-step walkthrough for Windows, Mac, and Linux.
 
 ### Prerequisites
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running.
