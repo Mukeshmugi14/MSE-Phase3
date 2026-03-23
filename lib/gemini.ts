@@ -10,32 +10,43 @@ export interface AssessmentResult {
 }
 
 // Use a function to get the host at runtime to avoid Next.js build-time capture
-const getOllamaHost = () => process.env.OLLAMA_HOST || '127.0.0.1'
+const getOllamaHost = () => process.env.OLLAMA_HOST || 'ollama'
 const OLLAMA_PORT = 11434
 
 /**
  * Check if Ollama is running and reachable.
  */
 async function checkOllamaHealth(): Promise<void> {
-    const host = getOllamaHost()
-    console.log(`[Clinical-AI] Checking Ollama health at http://${host}:${OLLAMA_PORT}/api/tags ...`)
+  const host = getOllamaHost()
+  console.log(`[Clinical-AI] Checking Ollama health at http://${host}:${OLLAMA_PORT}/api/tags ...`)
+  
+  let attempts = 0;
+  const maxAttempts = 10;
+  
+  while (attempts < maxAttempts) {
     try {
       const res = await fetch(`http://${host}:${OLLAMA_PORT}/api/tags`, {
-        signal: AbortSignal.timeout(10000),
+        signal: AbortSignal.timeout(5000),
       })
-      if (!res.ok) {
-        throw new Error(`Ollama returned status ${res.status} for ${host}`)
+      if (res.ok) {
+        const data = await res.json()
+        console.log(`[Clinical-AI] Ollama is running. Available models: ${data.models?.map((m: any) => m.name).join(', ') || 'none'}`)
+        return;
       }
-      const data = await res.json()
-      console.log(`[Clinical-AI] Ollama is running. Available models: ${data.models?.map((m: any) => m.name).join(', ') || 'none'}`)
     } catch (err: any) {
-      throw new Error(
-        `Ollama is not running or unreachable at ${host}:${OLLAMA_PORT}. ` +
-        `Please start Ollama (https://ollama.ai) and pull gemma3 with: ollama pull gemma3:4b. ` +
-        `Details: ${String(err?.message || err)}`
-      )
+      console.log(`[Clinical-AI] Ollama unreachable, retrying (${attempts + 1}/${maxAttempts})...`);
+    }
+    attempts++;
+    if (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
     }
   }
+  
+  throw new Error(
+    `Ollama is not running or unreachable at ${host}:${OLLAMA_PORT} after ${maxAttempts} attempts. ` +
+    `Please check Docker networking.`
+  )
+}
 
 /**
  * Build the clinical prompt with explicit JSON schema so Llama3 returns valid AssessmentResult.
